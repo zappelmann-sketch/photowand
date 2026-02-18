@@ -1,0 +1,1 @@
+"""Photowand — Hexagonale Bildrahmen-Druckvorlage."""
