@@ -1,7 +1,8 @@
 """A4-Renderer: Erzeugt das finale 300-DPI-Druckbild."""
 
 import math
-from PIL import Image, ImageDraw
+import os
+from PIL import Image, ImageDraw, ImageFont
 from photowand.core.hexagon import HexagonGeometry
 from photowand.core.layout import LayoutEngine, HexSlotPosition
 from photowand.models import HexSlotData
@@ -24,16 +25,9 @@ class A4Renderer:
         self,
         slots: list[HexSlotData],
         schnittlinien: bool = True,
+        beschriftung: bool = False,
     ) -> Image.Image:
-        """Erzeugt ein A4-Druckbild mit allen belegten Hexagon-Slots.
-
-        Args:
-            slots: Liste der 6 Slot-Daten (belegt oder leer).
-            schnittlinien: Wenn True, werden Schnittlinien gezeichnet.
-
-        Returns:
-            RGBA-Bild in A4-Groesse bei self.dpi.
-        """
+        """Erzeugt ein Druckbild mit allen belegten Hexagon-Slots."""
         breite, hoehe = self.layout.seiten_groesse_px()
         canvas = Image.new("RGB", (breite, hoehe), "white")
         positionen = self.layout.berechne_positionen()
@@ -47,12 +41,10 @@ class A4Renderer:
             cy = HexagonGeometry.mm_to_px(pos.center_y_mm, self.dpi)
 
             hex_bild = self._foto_in_hexagon(slot)
-            # Einfuegen auf Canvas (zentriert)
             bb_w, bb_h = self.hex.bounding_box_px(self.dpi)
             paste_x = cx - bb_w // 2
             paste_y = cy - bb_h // 2
 
-            # RGBA compositing
             if hex_bild.mode == "RGBA":
                 canvas.paste(hex_bild, (paste_x, paste_y), hex_bild)
             else:
@@ -61,6 +53,9 @@ class A4Renderer:
         if schnittlinien:
             self._zeichne_schnittlinien(canvas, positionen)
 
+        if beschriftung:
+            self._zeichne_beschriftungen(canvas, positionen, slots)
+
         return canvas
 
     def render_und_speichern(
@@ -68,22 +63,28 @@ class A4Renderer:
         slots: list[HexSlotData],
         pfad: str,
         schnittlinien: bool = True,
+        beschriftung: bool = False,
         qualitaet: int = 95,
     ) -> None:
         """Rendert und speichert das Druckbild."""
-        bild = self.render(slots, schnittlinien)
+        bild = self.render(slots, schnittlinien, beschriftung)
         if pfad.lower().endswith(".png"):
             bild.save(pfad, "PNG")
         else:
             bild.save(pfad, "JPEG", quality=qualitaet)
 
     def _foto_in_hexagon(self, slot: HexSlotData) -> Image.Image:
-        """Clippt ein Foto hexagonal mit Zoom und Offset."""
+        """Clippt ein Foto hexagonal mit Zoom, Offset und Rotation."""
         foto = slot.foto_bild
+
+        # Rotation anwenden
+        if slot.rotation != 0:
+            foto = foto.rotate(-slot.rotation, expand=True)
+
         bb_w, bb_h = self.hex.bounding_box_px(self.dpi)
         r_px = HexagonGeometry.mm_to_px(self.hex.circumradius_mm, self.dpi)
 
-        # Cover-Fit-Skalierung: Foto fuellt das Hexagon-Bounding-Box
+        # Cover-Fit-Skalierung
         scale_base = max(bb_w / foto.width, bb_h / foto.height)
         scale = scale_base * slot.zoom
 
@@ -103,7 +104,6 @@ class A4Renderer:
         crop_x2 = crop_x1 + bb_w
         crop_y2 = crop_y1 + bb_h
 
-        # Sicherstellung, dass der Crop innerhalb des Bildes liegt
         ausschnitt = Image.new("RGB", (bb_w, bb_h), (255, 255, 255))
         paste_x = max(0, -crop_x1)
         paste_y = max(0, -crop_y1)
@@ -119,7 +119,6 @@ class A4Renderer:
         # Hexagonale Maske erstellen
         maske = self._erstelle_hex_maske(bb_w, bb_h, r_px)
 
-        # Compositing
         ergebnis = Image.new("RGBA", (bb_w, bb_h), (0, 0, 0, 0))
         ergebnis.paste(ausschnitt, (0, 0))
         ergebnis.putalpha(maske)
@@ -134,10 +133,10 @@ class A4Renderer:
         cy = hoehe / 2
         vertices = [
             (
-                cx + r_px * math.cos(math.radians(winkel)),
-                cy + r_px * math.sin(math.radians(winkel)),
+                cx + r_px * math.cos(math.radians(w)),
+                cy + r_px * math.sin(math.radians(w)),
             )
-            for winkel in [0, 60, 120, 180, 240, 300]
+            for w in self.hex.winkel
         ]
         draw.polygon(vertices, fill=255)
         return maske
@@ -155,10 +154,52 @@ class A4Renderer:
 
             vertices = [
                 (
-                    cx + r_px * math.cos(math.radians(winkel)),
-                    cy + r_px * math.sin(math.radians(winkel)),
+                    cx + r_px * math.cos(math.radians(w)),
+                    cy + r_px * math.sin(math.radians(w)),
                 )
-                for winkel in [0, 60, 120, 180, 240, 300]
+                for w in self.hex.winkel
             ]
-            # Geschlossenes Polygon
             draw.polygon(vertices, outline=(180, 180, 180), width=1)
+
+    def _zeichne_beschriftungen(
+        self,
+        canvas: Image.Image,
+        positionen: list[HexSlotPosition],
+        slots: list[HexSlotData],
+    ) -> None:
+        """Zeichnet Beschriftungen unter jedes belegte Hexagon."""
+        draw = ImageDraw.Draw(canvas)
+        font_groesse = max(20, HexagonGeometry.mm_to_px(3.0, self.dpi))
+
+        try:
+            font = ImageFont.truetype("segoeui.ttf", font_groesse)
+        except Exception:
+            try:
+                font = ImageFont.truetype("arial.ttf", font_groesse)
+            except Exception:
+                font = ImageFont.load_default()
+
+        bb_h = self.hex.bounding_box_px(self.dpi)[1]
+
+        for slot in slots:
+            if not slot.ist_belegt:
+                continue
+
+            text = slot.beschriftung
+            if not text and slot.foto_pfad:
+                text = os.path.splitext(os.path.basename(slot.foto_pfad))[0]
+            if not text:
+                continue
+
+            pos = positionen[slot.slot_index]
+            cx = HexagonGeometry.mm_to_px(pos.center_x_mm, self.dpi)
+            cy = HexagonGeometry.mm_to_px(pos.center_y_mm, self.dpi)
+
+            text_y = cy + bb_h // 2 + font_groesse // 2
+            draw.text(
+                (cx, text_y),
+                text,
+                fill=(100, 100, 100),
+                font=font,
+                anchor="mt",
+            )

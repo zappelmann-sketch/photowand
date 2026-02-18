@@ -14,6 +14,8 @@ class HexSlotData:
     zoom: float = 1.0
     offset_x: float = 0.0  # Verschiebung in mm
     offset_y: float = 0.0  # Verschiebung in mm
+    rotation: int = 0  # 0, 90, 180, 270 Grad
+    beschriftung: str = ""  # Freitext (leer = Dateiname)
 
     @property
     def ist_belegt(self) -> bool:

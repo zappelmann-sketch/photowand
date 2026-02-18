@@ -1,6 +1,7 @@
-"""Interaktives Hexagon-Slot-Widget mit Zoom und Pan."""
+"""Interaktives Hexagon-Slot-Widget mit Zoom, Pan, Rotation und Drag&Drop."""
 
 import math
+import os
 import tkinter as tk
 from PIL import Image, ImageDraw, ImageTk
 
@@ -13,8 +14,9 @@ class HexSlotCanvas(tk.Canvas):
 
     Unterstuetzt:
     - Mausrad: Zoom
-    - Linke Maustaste + Ziehen: Pan
+    - Linke Maustaste + Ziehen: Pan (innerhalb Slot) / Drag&Drop (ausserhalb)
     - Doppelklick: Zuruecksetzen
+    - Rotation: 90/180/270 Grad
     """
 
     def __init__(
@@ -25,6 +27,8 @@ class HexSlotCanvas(tk.Canvas):
         vorschau_groesse: int = 160,
         on_klick: callable = None,
         on_rechtsklick: callable = None,
+        on_drag_start: callable = None,
+        on_drag_ende: callable = None,
         **kwargs,
     ):
         self._groesse = vorschau_groesse
@@ -43,6 +47,8 @@ class HexSlotCanvas(tk.Canvas):
         self.hex_geo = hex_geo
         self._on_klick = on_klick
         self._on_rechtsklick = on_rechtsklick
+        self._on_drag_start = on_drag_start
+        self._on_drag_ende = on_drag_ende
 
         # Slot-Daten
         self._slot_data = HexSlotData(slot_index=slot_index)
@@ -53,8 +59,13 @@ class HexSlotCanvas(tk.Canvas):
         self._drag_start_x = 0
         self._drag_start_y = 0
 
+        # Drag&Drop zwischen Slots
+        self._drag_aktiv = False
+
+        # Beschriftung
+        self.beschriftung_sichtbar = False
+
         # Skalierungsfaktor: Vorschau-Pixel pro mm
-        # Hexagon fuellt 85% des Widgets, Rand drumherum
         self._padding = 0.85
         self._scale = vorschau_groesse * self._padding / self.hex_geo.breite_mm
         self._r_preview = self.hex_geo.circumradius_mm * self._scale
@@ -86,6 +97,7 @@ class HexSlotCanvas(tk.Canvas):
         self._slot_data.zoom = 1.0
         self._slot_data.offset_x = 0.0
         self._slot_data.offset_y = 0.0
+        self._slot_data.rotation = 0
         self._vorschau_aktualisieren()
 
     def foto_entfernen(self) -> None:
@@ -96,11 +108,20 @@ class HexSlotCanvas(tk.Canvas):
         self._slot_data.zoom = 1.0
         self._slot_data.offset_x = 0.0
         self._slot_data.offset_y = 0.0
+        self._slot_data.rotation = 0
+        self._slot_data.beschriftung = ""
         self._tk_bild = None
         self._zeichne_leer()
 
+    def foto_drehen(self, grad: int) -> None:
+        """Dreht das Foto um grad Grad (90, -90, 180)."""
+        if self._foto_original is None:
+            return
+        self._slot_data.rotation = (self._slot_data.rotation + grad) % 360
+        self._vorschau_aktualisieren()
+
     def zuruecksetzen(self) -> None:
-        """Setzt Zoom und Offset zurueck, behält aber das Foto."""
+        """Setzt Zoom und Offset zurueck, behaelt aber das Foto."""
         if self._foto_original is not None:
             self._slot_data.zoom = 1.0
             self._slot_data.offset_x = 0.0
@@ -139,7 +160,7 @@ class HexSlotCanvas(tk.Canvas):
                 cx + r * math.cos(math.radians(w)),
                 cy + r * math.sin(math.radians(w)),
             )
-            for w in [0, 60, 120, 180, 240, 300]
+            for w in self.hex_geo.winkel
         ]
 
         self.create_polygon(
@@ -160,24 +181,25 @@ class HexSlotCanvas(tk.Canvas):
         )
 
     def _vorschau_aktualisieren(self) -> None:
-        """Aktualisiert die Vorschau-Anzeige.
-
-        Algorithmus ist identisch zum Renderer (renderer.py),
-        nur auf Vorschau-Pixelgroesse skaliert statt 300 DPI.
-        """
+        """Aktualisiert die Vorschau-Anzeige mit Rotation."""
         if self._foto_original is None:
             self._zeichne_leer()
             return
 
         groesse = self._groesse
         foto = self._foto_original
+
+        # Rotation anwenden
+        if self._slot_data.rotation != 0:
+            foto = foto.rotate(-self._slot_data.rotation, expand=True)
+
         r = self._r_preview
 
-        # Hex-Bounding-Box in Vorschau-Pixel (identisch zum Renderer)
+        # Hex-Bounding-Box in Vorschau-Pixel
         hex_bb_w = round(self.hex_geo.breite_mm * self._scale)
         hex_bb_h = round(self.hex_geo.hoehe_mm * self._scale)
 
-        # Cover-Fit auf Hex-Bounding-Box (nicht auf Quadrat!)
+        # Cover-Fit auf Hex-Bounding-Box
         scale_base = max(hex_bb_w / foto.width, hex_bb_h / foto.height)
         scale = scale_base * self._slot_data.zoom
 
@@ -189,7 +211,7 @@ class HexSlotCanvas(tk.Canvas):
         offset_x_px = round(self._slot_data.offset_x * self._scale)
         offset_y_px = round(self._slot_data.offset_y * self._scale)
 
-        # Ausschnitt in Hex-BB-Groesse berechnen (zentriert + Offset)
+        # Ausschnitt in Hex-BB-Groesse berechnen
         crop_cx = new_w // 2 - offset_x_px
         crop_cy = new_h // 2 - offset_y_px
         crop_x1 = crop_cx - hex_bb_w // 2
@@ -207,7 +229,7 @@ class HexSlotCanvas(tk.Canvas):
             teil = foto_skaliert.crop((src_x1, src_y1, src_x2, src_y2))
             ausschnitt.paste(teil, (paste_x, paste_y))
 
-        # Hexagonale Maske innerhalb Bounding-Box
+        # Hexagonale Maske
         cx_hex = hex_bb_w / 2
         cy_hex = hex_bb_h / 2
         maske = Image.new("L", (hex_bb_w, hex_bb_h), 0)
@@ -217,7 +239,7 @@ class HexSlotCanvas(tk.Canvas):
                 cx_hex + r * math.cos(math.radians(w)),
                 cy_hex + r * math.sin(math.radians(w)),
             )
-            for w in [0, 60, 120, 180, 240, 300]
+            for w in self.hex_geo.winkel
         ]
         draw.polygon(hex_vertices, fill=255)
 
@@ -238,7 +260,7 @@ class HexSlotCanvas(tk.Canvas):
                 ox + cx_hex + r * math.cos(math.radians(w)),
                 oy + cy_hex + r * math.sin(math.radians(w)),
             )
-            for w in [0, 60, 120, 180, 240, 300]
+            for w in self.hex_geo.winkel
         ]
         draw_bg.polygon(canvas_vertices, outline="#888888", width=1)
 
@@ -246,32 +268,65 @@ class HexSlotCanvas(tk.Canvas):
         self.delete("all")
         self.create_image(0, 0, anchor="nw", image=self._tk_bild)
 
+        # Beschriftung anzeigen
+        if self.beschriftung_sichtbar and self.ist_belegt:
+            text = self._slot_data.beschriftung
+            if not text and self._slot_data.foto_pfad:
+                text = os.path.splitext(os.path.basename(self._slot_data.foto_pfad))[0]
+            if text:
+                font_size = max(8, int(self._groesse * 0.08))
+                self.create_text(
+                    self._groesse // 2,
+                    self._groesse - 3,
+                    text=text,
+                    fill="white",
+                    font=("Segoe UI", font_size),
+                    anchor="s",
+                    width=self._groesse - 6,
+                )
+
     def _on_maus_klick(self, event: tk.Event) -> None:
         """Start des Ziehens oder Slot-Auswahl."""
         self._drag_start_x = event.x
         self._drag_start_y = event.y
+        self._drag_aktiv = False
         if self._on_klick:
             self._on_klick(self.slot_index)
 
     def _on_ziehen(self, event: tk.Event) -> None:
-        """Pan: Foto im Hexagon verschieben."""
+        """Pan oder Drag&Drop zwischen Slots."""
         if self._foto_original is None:
             return
 
+        if self._drag_aktiv:
+            return
+
+        # Cursor ausserhalb des Widgets? → Drag&Drop starten
+        grenze = 15
+        if (event.x < -grenze or event.x > self._groesse + grenze or
+                event.y < -grenze or event.y > self._groesse + grenze):
+            self._drag_aktiv = True
+            if self._on_drag_start:
+                self._on_drag_start(self.slot_index)
+            return
+
+        # Normales Pan innerhalb des Slots
         dx_px = event.x - self._drag_start_x
         dy_px = event.y - self._drag_start_y
         self._drag_start_x = event.x
         self._drag_start_y = event.y
 
-        # Pixel-Delta in mm umrechnen
         self._slot_data.offset_x += dx_px / self._scale
         self._slot_data.offset_y += dy_px / self._scale
 
         self._vorschau_aktualisieren()
 
     def _on_ziehen_ende(self, event: tk.Event) -> None:
-        """Ende des Ziehens."""
-        pass
+        """Ende des Ziehens — ggf. Drag&Drop abschliessen."""
+        if self._drag_aktiv:
+            self._drag_aktiv = False
+            if self._on_drag_ende:
+                self._on_drag_ende(self.slot_index, event)
 
     def _on_doppelklick(self, event: tk.Event) -> None:
         """Zoom und Offset zuruecksetzen."""
@@ -279,7 +334,7 @@ class HexSlotCanvas(tk.Canvas):
 
     def _on_mausrad(self, event: tk.Event) -> None:
         """Zoom per Mausrad (nur ohne Ctrl — Ctrl ist Vorschau-Zoom)."""
-        if event.state & 0x4:  # Ctrl gehalten → Vorschau-Zoom
+        if event.state & 0x4:
             return
         if self._foto_original is None:
             return
@@ -289,7 +344,6 @@ class HexSlotCanvas(tk.Canvas):
         else:
             self._slot_data.zoom /= 1.1
 
-        # Zoom begrenzen
         self._slot_data.zoom = max(0.3, min(5.0, self._slot_data.zoom))
         self._vorschau_aktualisieren()
 

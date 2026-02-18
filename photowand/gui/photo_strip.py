@@ -1,5 +1,6 @@
 """Foto-Seitenleiste: Zeigt importierte Fotos als Thumbnails."""
 
+import os
 import customtkinter as ctk
 from PIL import Image
 from typing import Callable
@@ -28,8 +29,20 @@ class PhotoStripFrame(ctk.CTkScrollableFrame):
         self._on_foto_ausgewaehlt = on_foto_ausgewaehlt
         self._pfade: list[str] = []
         self._thumbnail_widgets: list[ctk.CTkButton] = []
+        self._dateiname_labels: list[ctk.CTkLabel] = []
         self._ctk_bilder: list[ctk.CTkImage] = []
         self._ausgewaehlt: int | None = None
+
+        # Ordnerpfad-Label (oben)
+        self._ordner_label = ctk.CTkLabel(
+            self,
+            text="",
+            text_color="gray50",
+            font=("Segoe UI", 10),
+            wraplength=155,
+            anchor="w",
+            justify="left",
+        )
 
         self._label_leer = ctk.CTkLabel(
             self,
@@ -62,6 +75,12 @@ class PhotoStripFrame(ctk.CTkScrollableFrame):
         if self._label_leer.winfo_ismapped():
             self._label_leer.pack_forget()
 
+        # Ordnerpfad anzeigen (vom ersten neuen Foto)
+        if pfade and not self._ordner_label.winfo_ismapped():
+            ordner = os.path.dirname(pfade[0])
+            self._ordner_label.configure(text=ordner)
+            self._ordner_label.pack(padx=5, pady=(5, 2), anchor="w")
+
         fehler = []
         for i, pfad in enumerate(pfade):
             try:
@@ -92,8 +111,23 @@ class PhotoStripFrame(ctk.CTkScrollableFrame):
                     border_width=0,
                     command=lambda idx=index: self._on_klick(idx),
                 )
-                btn.pack(pady=4, padx=5)
+                btn.pack(pady=(4, 0), padx=5)
                 self._thumbnail_widgets.append(btn)
+
+                # Dateiname unter dem Thumbnail
+                dateiname = os.path.splitext(os.path.basename(pfad))[0]
+                # Kuerzen wenn zu lang
+                if len(dateiname) > 20:
+                    dateiname = dateiname[:18] + "..."
+                name_label = ctk.CTkLabel(
+                    self,
+                    text=dateiname,
+                    text_color="gray55",
+                    font=("Segoe UI", 9),
+                    height=14,
+                )
+                name_label.pack(pady=(0, 2), padx=5)
+                self._dateiname_labels.append(name_label)
 
             except Exception as e:
                 fehler.append((pfad, str(e)))
@@ -118,10 +152,17 @@ class PhotoStripFrame(ctk.CTkScrollableFrame):
         """Entfernt alle Fotos."""
         for widget in self._thumbnail_widgets:
             widget.destroy()
+        for label in self._dateiname_labels:
+            label.destroy()
         self._pfade.clear()
         self._thumbnail_widgets.clear()
+        self._dateiname_labels.clear()
         self._ctk_bilder.clear()
         self._ausgewaehlt = None
+
+        if self._ordner_label.winfo_ismapped():
+            self._ordner_label.pack_forget()
+        self._ordner_label.configure(text="")
 
         self._label_leer.pack(pady=40)
 

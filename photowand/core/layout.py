@@ -90,19 +90,19 @@ class LayoutEngine:
         hex_b = self.hex.breite_mm
         hex_h = self.hex.hoehe_mm
 
-        # Horizontale Verteilung (gleichmaessig zentriert)
+        # Horizontale Verteilung (gleichmaessige Luecken)
         gesamt_hex_b = self._spalten * hex_b
-        rand_h = (self._breite_mm - gesamt_hex_b) / 2
+        luecke_h = (self._breite_mm - gesamt_hex_b) / (self._spalten + 1)
         spalten_x = [
-            rand_h + hex_b / 2 + i * hex_b
+            luecke_h + hex_b / 2 + i * (hex_b + luecke_h)
             for i in range(self._spalten)
         ]
 
         # Vertikale Verteilung (gleichmaessige Luecken)
         gesamt_hex_h = self._zeilen * hex_h
-        luecke = (self._hoehe_mm - gesamt_hex_h) / (self._zeilen + 1)
+        luecke_v = (self._hoehe_mm - gesamt_hex_h) / (self._zeilen + 1)
         zeilen_y = [
-            luecke + hex_h / 2 + i * (hex_h + luecke)
+            luecke_v + hex_h / 2 + i * (hex_h + luecke_v)
             for i in range(self._zeilen)
         ]
 

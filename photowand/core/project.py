@@ -14,6 +14,8 @@ class SlotZuweisung:
     offset_x: float = 0.0
     offset_y: float = 0.0
     seite: int = 0
+    rotation: int = 0
+    beschriftung: str = ""
 
 
 @dataclass
@@ -24,6 +26,7 @@ class ProjektDaten:
     format_name: str = "A4"
     foto_pfade: list[str] = field(default_factory=list)
     slots: list[SlotZuweisung] = field(default_factory=list)
+    pointy_top: bool = False
 
 
 def projekt_speichern(pfad: str, daten: ProjektDaten) -> None:
@@ -31,6 +34,7 @@ def projekt_speichern(pfad: str, daten: ProjektDaten) -> None:
     obj = {
         "version": daten.version,
         "format_name": daten.format_name,
+        "pointy_top": daten.pointy_top,
         "foto_pfade": daten.foto_pfade,
         "slots": [
             {
@@ -40,6 +44,8 @@ def projekt_speichern(pfad: str, daten: ProjektDaten) -> None:
                 "offset_x": s.offset_x,
                 "offset_y": s.offset_y,
                 "seite": s.seite,
+                "rotation": s.rotation,
+                "beschriftung": s.beschriftung,
             }
             for s in daten.slots
         ],
@@ -61,6 +67,8 @@ def projekt_laden(pfad: str) -> ProjektDaten:
             offset_x=s.get("offset_x", 0.0),
             offset_y=s.get("offset_y", 0.0),
             seite=s.get("seite", 0),
+            rotation=s.get("rotation", 0),
+            beschriftung=s.get("beschriftung", ""),
         )
         for s in obj.get("slots", [])
     ]
@@ -70,4 +78,5 @@ def projekt_laden(pfad: str) -> ProjektDaten:
         format_name=obj.get("format_name", "A4"),
         foto_pfade=obj.get("foto_pfade", []),
         slots=slots,
+        pointy_top=obj.get("pointy_top", False),
     )

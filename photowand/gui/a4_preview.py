@@ -6,6 +6,7 @@ Mausrad auf Hintergrund: vertikal scrollen
 """
 
 import tkinter as tk
+from tkinter import simpledialog
 import customtkinter as ctk
 
 from photowand.core.hexagon import HexagonGeometry
@@ -18,11 +19,7 @@ MAX_VORSCHAU_HOEHE = 650
 
 
 class PreviewPanel(ctk.CTkFrame):
-    """Zeigt die Seitenvorschau mit interaktiven Hexagon-Slots.
-
-    Unterstuetzt Zoom (Ctrl+Mausrad) und Pan (mittlere Maustaste)
-    fuer grosse Formate wie A0.
-    """
+    """Zeigt die Seitenvorschau mit interaktiven Hexagon-Slots."""
 
     def __init__(
         self,
@@ -41,8 +38,8 @@ class PreviewPanel(ctk.CTkFrame):
         self._a4_frame: ctk.CTkFrame | None = None
         self._vorschau_zoom = 1.0
         self._canvas_window_id = None
-        self._tausch_quelle: int | None = None  # Slot-Index fuer Tausch
-        self._on_zustand_sichern: callable = None  # Callback fuer Undo
+        self._tausch_quelle: int | None = None
+        self._on_zustand_sichern: callable = None
 
         # Scrollbare Flaeche
         self._scroll_canvas = tk.Canvas(
@@ -59,14 +56,12 @@ class PreviewPanel(ctk.CTkFrame):
             xscrollcommand=self._h_scroll.set,
         )
 
-        # Layout: Canvas + Scrollbars
         self._scroll_canvas.grid(row=0, column=0, sticky="nsew")
         self._v_scroll.grid(row=0, column=1, sticky="ns")
         self._h_scroll.grid(row=1, column=0, sticky="ew")
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
-        # Event-Bindings auf Canvas-Hintergrund
         self._scroll_canvas.bind("<Control-MouseWheel>", self._on_vorschau_zoom)
         self._scroll_canvas.bind("<MouseWheel>", self._on_scroll_vertikal)
         self._scroll_canvas.bind("<Shift-MouseWheel>", self._on_scroll_horizontal)
@@ -128,6 +123,8 @@ class PreviewPanel(ctk.CTkFrame):
                 vorschau_groesse=slot_groesse,
                 on_klick=self._slot_klick_handler,
                 on_rechtsklick=self._on_slot_rechtsklick,
+                on_drag_start=self._on_drag_start,
+                on_drag_ende=self._on_drag_ende,
             )
             slot_pad = max(1, int(slot_groesse * 0.06))
             slot.grid(
@@ -138,20 +135,16 @@ class PreviewPanel(ctk.CTkFrame):
             )
             self._slots.append(slot)
 
-            # Ctrl+Scroll auf Slots → Vorschau-Zoom
             slot.bind("<Control-MouseWheel>", self._on_vorschau_zoom)
 
-        # Bindings auf A4-Frame-Hintergrund (weisse Flaeche zwischen Slots)
         self._a4_frame.bind("<Control-MouseWheel>", self._on_vorschau_zoom)
         self._a4_frame.bind("<MouseWheel>", self._on_scroll_vertikal)
         self._a4_frame.bind("<Shift-MouseWheel>", self._on_scroll_horizontal)
 
-        # Frame in Canvas platzieren
         self._canvas_window_id = self._scroll_canvas.create_window(
             0, 0, window=self._a4_frame, anchor="nw"
         )
 
-        # Scroll-Region nach Idle aktualisieren
         self.after_idle(self._aktualisiere_scroll_region)
 
     def _aktualisiere_scroll_region(self) -> None:
@@ -165,7 +158,6 @@ class PreviewPanel(ctk.CTkFrame):
         canvas_w = max(1, self._scroll_canvas.winfo_width())
         canvas_h = max(1, self._scroll_canvas.winfo_height())
 
-        # Zentrieren wenn Frame kleiner als Canvas
         x = max(20, (canvas_w - frame_w) // 2)
         y = max(20, (canvas_h - frame_h) // 2)
         self._scroll_canvas.coords(self._canvas_window_id, x, y)
@@ -195,12 +187,10 @@ class PreviewPanel(ctk.CTkFrame):
         slot_pad = max(1, int(neue_groesse * 0.06))
         grid_pad = max(2, int(neue_groesse * 0.05))
 
-        # Alle Slots resizen (ohne Neuaufbau)
         for slot in self._slots:
             slot.groesse_aendern(neue_groesse)
             slot.grid_configure(padx=slot_pad, pady=slot_pad)
 
-        # Grid-Padding aktualisieren
         spalten = self.layout.spalten
         zeilen = self.layout.zeilen
         for col in range(spalten):
@@ -214,29 +204,24 @@ class PreviewPanel(ctk.CTkFrame):
     # --- Scrolling / Panning ---
 
     def _on_scroll_vertikal(self, event) -> str:
-        """Mausrad auf Hintergrund: vertikal scrollen."""
         self._scroll_canvas.yview_scroll(-1 * (event.delta // 120), "units")
         return "break"
 
     def _on_scroll_horizontal(self, event) -> str:
-        """Shift+Mausrad: horizontal scrollen."""
         self._scroll_canvas.xview_scroll(-1 * (event.delta // 120), "units")
         return "break"
 
     def _on_pan_start(self, event) -> None:
-        """Mittlere Maustaste: Verschieben starten."""
         self._scroll_canvas.scan_mark(event.x, event.y)
 
     def _on_pan_move(self, event) -> None:
-        """Mittlere Maustaste: Ansicht verschieben."""
         self._scroll_canvas.scan_dragto(event.x, event.y, gain=1)
 
-    # --- Kontextmenue / Tausch (Features 3 & 5) ---
+    # --- Kontextmenue ---
 
     def _slot_klick_handler(self, slot_index: int) -> None:
         """Interner Klick-Handler: entweder Tausch oder normaler Klick."""
         if self._tausch_quelle is not None:
-            # Tausch ausfuehren
             self._tausch_ausfuehren(slot_index)
         elif self._on_slot_klick:
             self._on_slot_klick(slot_index)
@@ -255,6 +240,29 @@ class PreviewPanel(ctk.CTkFrame):
                 label="Zoom/Position zurücksetzen",
                 command=lambda: slot.zuruecksetzen(),
             )
+
+            # Drehen-Untermenue
+            drehen_menu = tk.Menu(menu, tearoff=0)
+            drehen_menu.add_command(
+                label="90° rechts",
+                command=lambda: self._slot_drehen(slot_index, 90),
+            )
+            drehen_menu.add_command(
+                label="180°",
+                command=lambda: self._slot_drehen(slot_index, 180),
+            )
+            drehen_menu.add_command(
+                label="90° links",
+                command=lambda: self._slot_drehen(slot_index, -90),
+            )
+            menu.add_cascade(label="Drehen", menu=drehen_menu)
+
+            menu.add_separator()
+            menu.add_command(
+                label="Beschriftung bearbeiten...",
+                command=lambda: self._beschriftung_bearbeiten(slot_index),
+            )
+
             menu.add_separator()
             menu.add_command(
                 label="Tauschen mit...",
@@ -271,10 +279,36 @@ class PreviewPanel(ctk.CTkFrame):
             self._on_zustand_sichern()
         self._slots[slot_index].foto_entfernen()
 
+    def _slot_drehen(self, slot_index: int, grad: int) -> None:
+        """Dreht das Foto in einem Slot."""
+        if self._on_zustand_sichern:
+            self._on_zustand_sichern()
+        self._slots[slot_index].foto_drehen(grad)
+
+    def _beschriftung_bearbeiten(self, slot_index: int) -> None:
+        """Oeffnet Dialog zum Bearbeiten der Beschriftung."""
+        slot = self._slots[slot_index]
+        aktuell = slot._slot_data.beschriftung
+        if not aktuell and slot._slot_data.foto_pfad:
+            import os
+            aktuell = os.path.splitext(os.path.basename(slot._slot_data.foto_pfad))[0]
+
+        ergebnis = simpledialog.askstring(
+            "Beschriftung",
+            "Text eingeben (leer = Dateiname):",
+            initialvalue=aktuell,
+            parent=self,
+        )
+        if ergebnis is not None:
+            slot._slot_data.beschriftung = ergebnis
+            if slot.beschriftung_sichtbar:
+                slot._vorschau_aktualisieren()
+
+    # --- Tausch ---
+
     def _tausch_starten(self, slot_index: int) -> None:
         """Startet den Tausch-Modus: naechster Klick tauscht."""
         self._tausch_quelle = slot_index
-        # Alle anderen Slots markieren
         for slot in self._slots:
             if slot.slot_index != slot_index:
                 slot.markieren(True)
@@ -301,14 +335,17 @@ class PreviewPanel(ctk.CTkFrame):
         a_zoom = slot_a._slot_data.zoom
         a_ox = slot_a._slot_data.offset_x
         a_oy = slot_a._slot_data.offset_y
+        a_rot = slot_a._slot_data.rotation
+        a_txt = slot_a._slot_data.beschriftung
 
         b_foto = slot_b._foto_original.copy() if slot_b._foto_original else None
         b_pfad = slot_b._slot_data.foto_pfad
         b_zoom = slot_b._slot_data.zoom
         b_ox = slot_b._slot_data.offset_x
         b_oy = slot_b._slot_data.offset_y
+        b_rot = slot_b._slot_data.rotation
+        b_txt = slot_b._slot_data.beschriftung
 
-        # Tauschen
         slot_a.foto_entfernen()
         slot_b.foto_entfernen()
 
@@ -317,6 +354,8 @@ class PreviewPanel(ctk.CTkFrame):
             slot_a._slot_data.zoom = b_zoom
             slot_a._slot_data.offset_x = b_ox
             slot_a._slot_data.offset_y = b_oy
+            slot_a._slot_data.rotation = b_rot
+            slot_a._slot_data.beschriftung = b_txt
             slot_a._vorschau_aktualisieren()
 
         if a_foto:
@@ -324,7 +363,35 @@ class PreviewPanel(ctk.CTkFrame):
             slot_b._slot_data.zoom = a_zoom
             slot_b._slot_data.offset_x = a_ox
             slot_b._slot_data.offset_y = a_oy
+            slot_b._slot_data.rotation = a_rot
+            slot_b._slot_data.beschriftung = a_txt
             slot_b._vorschau_aktualisieren()
+
+    # --- Drag & Drop zwischen Slots ---
+
+    def _on_drag_start(self, slot_index: int) -> None:
+        """Drag von einem Slot gestartet (Maus ausserhalb Slot-Grenze)."""
+        self._tausch_quelle = slot_index
+        for slot in self._slots:
+            if slot.slot_index != slot_index:
+                slot.markieren(True)
+        self._slots[slot_index].configure(highlightbackground="#FFD700")
+
+    def _on_drag_ende(self, slot_index: int, event) -> None:
+        """Drag beendet — Ziel-Slot ermitteln und tauschen."""
+        # Ziel-Widget unter dem Cursor finden
+        widget = event.widget.winfo_containing(event.x_root, event.y_root)
+        ziel_index = None
+        for slot in self._slots:
+            if widget is slot:
+                ziel_index = slot.slot_index
+                break
+
+        if ziel_index is not None and ziel_index != slot_index:
+            self._tausch_ausfuehren(ziel_index)
+        else:
+            self._tausch_quelle = None
+            self.markierung_aufheben()
 
     # --- Oeffentliche Methoden ---
 
@@ -358,6 +425,13 @@ class PreviewPanel(ctk.CTkFrame):
         """Hebt alle Slot-Markierungen auf."""
         for slot in self._slots:
             slot.markieren(False)
+
+    def beschriftung_setzen(self, sichtbar: bool) -> None:
+        """Setzt die Beschriftungs-Sichtbarkeit fuer alle Slots."""
+        for slot in self._slots:
+            slot.beschriftung_sichtbar = sichtbar
+            if slot.ist_belegt:
+                slot._vorschau_aktualisieren()
 
 
 # Rueckwaertskompatibilitaet

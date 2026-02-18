@@ -3,8 +3,6 @@
 import customtkinter as ctk
 from typing import Callable
 
-from photowand.core.layout import PAPIER_FORMATE
-
 
 class ToolbarFrame(ctk.CTkFrame):
     """Horizontale Werkzeugleiste mit den Hauptaktionen."""
@@ -14,12 +12,7 @@ class ToolbarFrame(ctk.CTkFrame):
 
         self._callbacks = callbacks
 
-        # Spacer-Spalte
-        self.grid_columnconfigure(20, weight=1)
-
         btn_style = {"height": 35, "corner_radius": 6}
-
-        # --- Linke Seite: Aktionsbuttons ---
 
         col = 0
         self.btn_laden = ctk.CTkButton(
@@ -97,6 +90,18 @@ class ToolbarFrame(ctk.CTkFrame):
         self.btn_exportieren.grid(row=0, column=col, padx=3, pady=8)
 
         col += 1
+        self.btn_alle_exportieren = ctk.CTkButton(
+            self,
+            text="Alle export.",
+            command=callbacks.get("alle_exportieren"),
+            fg_color="gray40",
+            hover_color="gray30",
+            width=90,
+            **btn_style,
+        )
+        self.btn_alle_exportieren.grid(row=0, column=col, padx=3, pady=8)
+
+        col += 1
         self.btn_drucken = ctk.CTkButton(
             self,
             text="Drucken",
@@ -121,46 +126,3 @@ class ToolbarFrame(ctk.CTkFrame):
             **btn_style,
         )
         self.btn_zuruecksetzen.grid(row=0, column=col, padx=3, pady=8)
-
-        # --- Rechte Seite (nach Spacer) ---
-
-        # Schnittlinien-Toggle
-        self._schnittlinien_var = ctk.BooleanVar(value=True)
-        self.schnittlinien_switch = ctk.CTkSwitch(
-            self,
-            text="Schnittlinien",
-            variable=self._schnittlinien_var,
-            font=("Segoe UI", 12),
-            width=40,
-        )
-        self.schnittlinien_switch.grid(row=0, column=21, padx=(10, 5), pady=8)
-
-        # Papierformat-Auswahl
-        format_label = ctk.CTkLabel(
-            self,
-            text="Format:",
-            font=("Segoe UI", 13),
-        )
-        format_label.grid(row=0, column=22, padx=(10, 2), pady=8)
-
-        format_namen = list(PAPIER_FORMATE.keys())
-        self._format_var = ctk.StringVar(value="A4")
-        self.format_dropdown = ctk.CTkComboBox(
-            self,
-            values=format_namen,
-            variable=self._format_var,
-            width=80,
-            height=35,
-            state="readonly",
-            command=lambda val: callbacks.get("format_aendern", lambda v: None)(val),
-        )
-        self.format_dropdown.grid(row=0, column=23, padx=(2, 10), pady=8)
-
-    @property
-    def schnittlinien_aktiv(self) -> bool:
-        """Gibt zurueck ob Schnittlinien aktiviert sind."""
-        return self._schnittlinien_var.get()
-
-    def format_setzen(self, format_name: str) -> None:
-        """Setzt das Format im Dropdown (ohne Callback auszuloesen)."""
-        self._format_var.set(format_name)

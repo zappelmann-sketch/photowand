@@ -4,14 +4,14 @@ import os
 import sys
 import tempfile
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, simpledialog
 
 import customtkinter as ctk
 from PIL import Image
 
 from photowand.core.hexagon import HexagonGeometry
 from photowand.core.image_utils import sammle_bilder_aus_ordner, lade_bild, BILD_ENDUNGEN
-from photowand.core.layout import LayoutEngine
+from photowand.core.layout import LayoutEngine, PAPIER_FORMATE
 from photowand.core.project import ProjektDaten, SlotZuweisung, projekt_speichern, projekt_laden
 from photowand.core.renderer import A4Renderer
 from photowand.gui.a4_preview import PreviewPanel
@@ -35,7 +35,7 @@ class PhotowandApp(TkinterDnD.Tk if DND_VERFUEGBAR else tk.Tk):
     def __init__(self):
         super().__init__()
 
-        self.title("Photowand v1.0.1 — Hexagonale Bildrahmen")
+        self.title("Photowand v1.0.3 — Hexagonale Bildrahmen")
         self.geometry("1100x800")
         self.minsize(900, 650)
         self.configure(bg="#2b2b2b")
@@ -64,7 +64,14 @@ class PhotowandApp(TkinterDnD.Tk if DND_VERFUEGBAR else tk.Tk):
         self._undo_stack: list[dict] = []
         self._redo_stack: list[dict] = []
 
+        # Ansicht-Variablen (fuer Menuleiste)
+        self._schnittlinien_var = tk.BooleanVar(value=True)
+        self._beschriftung_var = tk.BooleanVar(value=False)
+        self._pointy_top_var = tk.BooleanVar(value=False)
+        self._format_var = tk.StringVar(value="A4")
+
         # GUI aufbauen
+        self._erstelle_menuleiste()
         self._erstelle_gui()
 
         # Drag & Drop einrichten
@@ -77,13 +84,102 @@ class PhotowandApp(TkinterDnD.Tk if DND_VERFUEGBAR else tk.Tk):
         self.bind("<Control-z>", lambda e: self._undo())
         self.bind("<Control-y>", lambda e: self._redo())
 
+    def _erstelle_menuleiste(self) -> None:
+        """Erstellt die native Windows-Menuleiste."""
+        self._menubar = tk.Menu(self)
+        self.configure(menu=self._menubar)
+
+        # --- Datei ---
+        datei_menu = tk.Menu(self._menubar, tearoff=0)
+        datei_menu.add_command(label="Fotos laden...", command=self._ordner_laden)
+        datei_menu.add_separator()
+        datei_menu.add_command(
+            label="Projekt speichern...", command=self._projekt_speichern,
+            accelerator="Strg+S",
+        )
+        datei_menu.add_command(
+            label="Projekt öffnen...", command=self._projekt_laden,
+            accelerator="Strg+O",
+        )
+        datei_menu.add_separator()
+        datei_menu.add_command(label="Exportieren (PNG)...", command=self._exportieren)
+        datei_menu.add_command(
+            label="Alle Seiten exportieren...", command=self._alle_seiten_exportieren,
+        )
+        datei_menu.add_separator()
+        datei_menu.add_command(label="Drucken", command=self._drucken)
+        datei_menu.add_separator()
+        datei_menu.add_command(label="Beenden", command=self._beenden)
+        self._menubar.add_cascade(label="Datei", menu=datei_menu)
+
+        # --- Bearbeiten ---
+        bearbeiten_menu = tk.Menu(self._menubar, tearoff=0)
+        bearbeiten_menu.add_command(
+            label="Rückgängig", command=self._undo, accelerator="Strg+Z",
+        )
+        bearbeiten_menu.add_command(
+            label="Wiederherstellen", command=self._redo, accelerator="Strg+Y",
+        )
+        bearbeiten_menu.add_separator()
+        bearbeiten_menu.add_command(label="Auto-Fill", command=self._auto_fill)
+        bearbeiten_menu.add_command(
+            label="Alles zurücksetzen", command=self._zuruecksetzen,
+        )
+        self._menubar.add_cascade(label="Bearbeiten", menu=bearbeiten_menu)
+
+        # --- Ansicht ---
+        ansicht_menu = tk.Menu(self._menubar, tearoff=0)
+        ansicht_menu.add_command(label="Vorschau", command=self._vorschau_anzeigen)
+        ansicht_menu.add_separator()
+        ansicht_menu.add_checkbutton(
+            label="Schnittlinien", variable=self._schnittlinien_var,
+        )
+        ansicht_menu.add_checkbutton(
+            label="Beschriftung", variable=self._beschriftung_var,
+            command=self._beschriftung_umschalten,
+        )
+        ansicht_menu.add_separator()
+        ansicht_menu.add_checkbutton(
+            label="Pointy-Top Orientierung", variable=self._pointy_top_var,
+            command=self._orientierung_aendern,
+        )
+        ansicht_menu.add_separator()
+
+        # Format-Untermenu
+        format_menu = tk.Menu(ansicht_menu, tearoff=0)
+        for fmt in PAPIER_FORMATE:
+            format_menu.add_radiobutton(
+                label=fmt,
+                variable=self._format_var,
+                value=fmt,
+                command=self._format_aendern_menu,
+            )
+        ansicht_menu.add_cascade(label="Papierformat", menu=format_menu)
+        self._menubar.add_cascade(label="Ansicht", menu=ansicht_menu)
+
+        # --- Seite ---
+        seite_menu = tk.Menu(self._menubar, tearoff=0)
+        seite_menu.add_command(label="Neue Seite", command=self._seite_hinzufuegen)
+        seite_menu.add_command(label="Seite löschen", command=self._seite_loeschen)
+        seite_menu.add_separator()
+        seite_menu.add_command(label="Vorherige Seite", command=self._seite_zurueck)
+        seite_menu.add_command(label="Nächste Seite", command=self._seite_vor)
+        self._menubar.add_cascade(label="Seite", menu=seite_menu)
+
+        # --- Hilfe ---
+        hilfe_menu = tk.Menu(self._menubar, tearoff=0)
+        hilfe_menu.add_command(label="Anleitung...", command=self._anleitung_anzeigen)
+        hilfe_menu.add_separator()
+        hilfe_menu.add_command(label="Über Photowand", command=self._ueber_anzeigen)
+        self._menubar.add_cascade(label="Hilfe", menu=hilfe_menu)
+
     def _erstelle_gui(self) -> None:
         """Baut die gesamte GUI auf."""
         # Hauptcontainer
         self._main_frame = ctk.CTkFrame(self, fg_color="#2b2b2b")
         self._main_frame.pack(fill="both", expand=True)
 
-        # Toolbar
+        # Toolbar (nur Aktionsbuttons — Optionen sind im Menue)
         self._toolbar = ToolbarFrame(
             self._main_frame,
             callbacks={
@@ -93,9 +189,9 @@ class PhotowandApp(TkinterDnD.Tk if DND_VERFUEGBAR else tk.Tk):
                 "projekt_laden": self._projekt_laden,
                 "vorschau": self._vorschau_anzeigen,
                 "exportieren": self._exportieren,
+                "alle_exportieren": self._alle_seiten_exportieren,
                 "drucken": self._drucken,
                 "zuruecksetzen": self._zuruecksetzen,
-                "format_aendern": self._format_aendern,
             },
         )
         self._toolbar.pack(fill="x", padx=0, pady=0)
@@ -185,7 +281,19 @@ class PhotowandApp(TkinterDnD.Tk if DND_VERFUEGBAR else tk.Tk):
             fg_color="#2D7D46",
             hover_color="#236B38",
         )
-        self._btn_seite_neu.pack(side="left", padx=(6, 0))
+        self._btn_seite_neu.pack(side="left", padx=(6, 2))
+
+        self._btn_seite_loeschen = ctk.CTkButton(
+            self._seiten_frame,
+            text="− Seite",
+            width=60,
+            height=24,
+            corner_radius=4,
+            command=self._seite_loeschen,
+            fg_color="#8B3A3A",
+            hover_color="#6B2A2A",
+        )
+        self._btn_seite_loeschen.pack(side="left", padx=(2, 0))
 
     def _init_drag_drop(self) -> None:
         """Richtet Drag & Drop fuer Dateien ein."""
@@ -274,7 +382,7 @@ class PhotowandApp(TkinterDnD.Tk if DND_VERFUEGBAR else tk.Tk):
 
         return pfade
 
-    # --- Auto-Fill (Feature 2) ---
+    # --- Auto-Fill ---
 
     def _auto_fill(self) -> None:
         """Weist Fotos automatisch der Reihe nach auf leere Slots zu.
@@ -382,7 +490,54 @@ class PhotowandApp(TkinterDnD.Tk if DND_VERFUEGBAR else tk.Tk):
             self._a4_preview.markierung_aufheben()
             self._status_aktualisieren()
 
-    # --- Projekt speichern/laden (Feature 1) ---
+    # --- Beschriftung / Orientierung ---
+
+    def _beschriftung_umschalten(self) -> None:
+        """Schaltet die Beschriftung fuer alle Slots um."""
+        aktiv = self._beschriftung_var.get()
+        for slot in self._a4_preview.alle_slots():
+            slot.beschriftung_sichtbar = aktiv
+            slot._vorschau_aktualisieren()
+
+    def _orientierung_aendern(self) -> None:
+        """Wechselt zwischen Flat-Top und Pointy-Top Hexagon-Orientierung."""
+        pointy = self._pointy_top_var.get()
+
+        # Aktuelle Seite sichern
+        self._seite_sichern()
+
+        # Neue Geometrie erstellen
+        self._hex_geo = HexagonGeometry(pointy_top=pointy)
+        self._layout = LayoutEngine(self._hex_geo)
+        self._renderer = A4Renderer(self._layout, self._hex_geo)
+
+        # Format beibehalten
+        fmt = self._format_var.get()
+        self._layout.setze_format(fmt)
+
+        # Preview komplett neu aufbauen
+        self._a4_preview.hex_geo = self._hex_geo
+        self._a4_preview.layout = self._layout
+        self._a4_preview.format_aktualisieren()
+        self._a4_preview._on_zustand_sichern = self._zustand_sichern
+
+        # Aktuelle Seite wiederherstellen
+        self._seite_laden_intern(self._aktuelle_seite)
+        self._status_aktualisieren()
+
+    def _format_aendern(self, format_name: str) -> None:
+        """Wechselt das Papierformat und baut die Vorschau neu auf."""
+        self._format_var.set(format_name)
+        self._layout.setze_format(format_name)
+        self._a4_preview.format_aktualisieren()
+        self._ausgewaehltes_foto = None
+        self._status_aktualisieren()
+
+    def _format_aendern_menu(self) -> None:
+        """Callback wenn Format im Menue geaendert wird."""
+        self._format_aendern(self._format_var.get())
+
+    # --- Projekt speichern/laden ---
 
     def _projekt_speichern(self) -> None:
         """Speichert das aktuelle Projekt als .photowand Datei."""
@@ -417,12 +572,15 @@ class PhotowandApp(TkinterDnD.Tk if DND_VERFUEGBAR else tk.Tk):
                         offset_x=daten_dict.get("offset_x", 0.0),
                         offset_y=daten_dict.get("offset_y", 0.0),
                         seite=seiten_nr,
+                        rotation=daten_dict.get("rotation", 0),
+                        beschriftung=daten_dict.get("beschriftung", ""),
                     ))
 
         daten = ProjektDaten(
             format_name=self._layout.format_name,
             foto_pfade=foto_pfade,
             slots=slot_zuweisungen,
+            pointy_top=self._hex_geo.pointy_top,
         )
 
         try:
@@ -458,10 +616,17 @@ class PhotowandApp(TkinterDnD.Tk if DND_VERFUEGBAR else tk.Tk):
         self._aktuelle_seite = 0
         self._seiten_daten = [{}]
 
+        # Pointy-Top setzen
+        if daten.pointy_top != self._hex_geo.pointy_top:
+            self._hex_geo = HexagonGeometry(pointy_top=daten.pointy_top)
+            self._layout = LayoutEngine(self._hex_geo)
+            self._renderer = A4Renderer(self._layout, self._hex_geo)
+            self._pointy_top_var.set(daten.pointy_top)
+            self._a4_preview.hex_geo = self._hex_geo
+            self._a4_preview.layout = self._layout
+
         # Format setzen
-        self._layout.setze_format(daten.format_name)
-        self._toolbar.format_setzen(daten.format_name)
-        self._a4_preview.format_aktualisieren()
+        self._format_aendern(daten.format_name)
 
         # Fotos laden (nur existierende)
         existierende = [p for p in daten.foto_pfade if os.path.isfile(p)]
@@ -486,28 +651,13 @@ class PhotowandApp(TkinterDnD.Tk if DND_VERFUEGBAR else tk.Tk):
                 "zoom": sz.zoom,
                 "offset_x": sz.offset_x,
                 "offset_y": sz.offset_y,
+                "rotation": sz.rotation,
+                "beschriftung": sz.beschriftung,
             }
 
         # Erste Seite laden
         self._aktuelle_seite = 0
-        zustand = self._seiten_daten[0] if self._seiten_daten else {}
-        for slot_idx, slot_daten in zustand.items():
-            idx = int(slot_idx) if isinstance(slot_idx, str) else slot_idx
-            if idx >= len(self._a4_preview.alle_slots()):
-                continue
-            pfad_slot = slot_daten.get("foto_pfad")
-            if not pfad_slot or not os.path.isfile(pfad_slot):
-                continue
-            try:
-                foto = lade_bild(pfad_slot)
-                slot = self._a4_preview.slot_abrufen(idx)
-                slot.foto_setzen(foto, pfad_slot)
-                slot._slot_data.zoom = slot_daten["zoom"]
-                slot._slot_data.offset_x = slot_daten["offset_x"]
-                slot._slot_data.offset_y = slot_daten["offset_y"]
-                slot._vorschau_aktualisieren()
-            except Exception:
-                fehler_slots += 1
+        self._seite_laden_intern(0)
 
         self._projekt_pfad = pfad
         name = os.path.basename(pfad)
@@ -538,13 +688,16 @@ class PhotowandApp(TkinterDnD.Tk if DND_VERFUEGBAR else tk.Tk):
             )
             return
 
-        schnittlinien = self._toolbar.schnittlinien_aktiv
+        schnittlinien = self._schnittlinien_var.get()
+        beschriftung = self._beschriftung_var.get()
         try:
-            bild = self._render_seite_bild(self._aktuelle_seite, schnittlinien)
+            bild = self._render_seite_bild(self._aktuelle_seite, schnittlinien, beschriftung)
             if bild is None:
                 # Aktuelle Seite leer — erste nicht-leere Seite suchen
                 bild = self._renderer.render(
-                    self._sammle_slot_daten(), schnittlinien=schnittlinien
+                    self._sammle_slot_daten(),
+                    schnittlinien=schnittlinien,
+                    beschriftung=beschriftung,
                 )
 
             VorschauDialog(
@@ -553,12 +706,14 @@ class PhotowandApp(TkinterDnD.Tk if DND_VERFUEGBAR else tk.Tk):
                 f"Druckvorschau — {self._layout.format_name}",
                 seiten_anzahl=len(self._seiten_daten),
                 aktuelle_seite=self._aktuelle_seite,
-                render_seite=lambda seite: self._render_seite_bild(seite, schnittlinien),
+                render_seite=lambda seite: self._render_seite_bild(seite, schnittlinien, beschriftung),
             )
         except Exception as e:
             messagebox.showerror("Fehler", f"Vorschau fehlgeschlagen:\n{e}")
 
-    def _render_seite_bild(self, seiten_nr: int, schnittlinien: bool) -> Image.Image | None:
+    def _render_seite_bild(
+        self, seiten_nr: int, schnittlinien: bool, beschriftung: bool = False
+    ) -> Image.Image | None:
         """Rendert das Druckbild fuer eine bestimmte Seite."""
         if seiten_nr < 0 or seiten_nr >= len(self._seiten_daten):
             return None
@@ -580,11 +735,15 @@ class PhotowandApp(TkinterDnD.Tk if DND_VERFUEGBAR else tk.Tk):
                         sd.zoom = slot_info.get("zoom", 1.0)
                         sd.offset_x = slot_info.get("offset_x", 0.0)
                         sd.offset_y = slot_info.get("offset_y", 0.0)
+                        sd.rotation = slot_info.get("rotation", 0)
+                        sd.beschriftung = slot_info.get("beschriftung", "")
                     except Exception:
                         pass
             slot_daten.append(sd)
 
-        return self._renderer.render(slot_daten, schnittlinien=schnittlinien)
+        return self._renderer.render(
+            slot_daten, schnittlinien=schnittlinien, beschriftung=beschriftung
+        )
 
     def _exportieren(self) -> None:
         """Exportiert das Druckbild als PNG."""
@@ -607,9 +766,14 @@ class PhotowandApp(TkinterDnD.Tk if DND_VERFUEGBAR else tk.Tk):
             return
 
         slots = self._sammle_slot_daten()
-        schnittlinien = self._toolbar.schnittlinien_aktiv
+        schnittlinien = self._schnittlinien_var.get()
+        beschriftung = self._beschriftung_var.get()
         try:
-            self._renderer.render_und_speichern(slots, pfad, schnittlinien=schnittlinien)
+            self._renderer.render_und_speichern(
+                slots, pfad,
+                schnittlinien=schnittlinien,
+                beschriftung=beschriftung,
+            )
             messagebox.showinfo(
                 "Exportiert",
                 f"Druckbild gespeichert:\n{pfad}",
@@ -627,11 +791,16 @@ class PhotowandApp(TkinterDnD.Tk if DND_VERFUEGBAR else tk.Tk):
             return
 
         slots = self._sammle_slot_daten()
-        schnittlinien = self._toolbar.schnittlinien_aktiv
+        schnittlinien = self._schnittlinien_var.get()
+        beschriftung = self._beschriftung_var.get()
         try:
             temp_dir = tempfile.gettempdir()
             temp_pfad = os.path.join(temp_dir, "photowand_druck.png")
-            self._renderer.render_und_speichern(slots, temp_pfad, schnittlinien=schnittlinien)
+            self._renderer.render_und_speichern(
+                slots, temp_pfad,
+                schnittlinien=schnittlinien,
+                beschriftung=beschriftung,
+            )
 
             os.startfile(temp_pfad, "print")
             self._status_var.set("Druckdialog geöffnet...")
@@ -652,7 +821,8 @@ class PhotowandApp(TkinterDnD.Tk if DND_VERFUEGBAR else tk.Tk):
         if not ordner:
             return
 
-        schnittlinien = self._toolbar.schnittlinien_aktiv
+        schnittlinien = self._schnittlinien_var.get()
+        beschriftung = self._beschriftung_var.get()
         fmt = self._layout.format_name
         exportiert = 0
 
@@ -671,6 +841,8 @@ class PhotowandApp(TkinterDnD.Tk if DND_VERFUEGBAR else tk.Tk):
                             sd.zoom = slot_info.get("zoom", 1.0)
                             sd.offset_x = slot_info.get("offset_x", 0.0)
                             sd.offset_y = slot_info.get("offset_y", 0.0)
+                            sd.rotation = slot_info.get("rotation", 0)
+                            sd.beschriftung = slot_info.get("beschriftung", "")
                         except Exception:
                             pass
                 slot_daten.append(sd)
@@ -679,7 +851,9 @@ class PhotowandApp(TkinterDnD.Tk if DND_VERFUEGBAR else tk.Tk):
             ziel = os.path.join(ordner, dateiname)
             try:
                 self._renderer.render_und_speichern(
-                    slot_daten, ziel, schnittlinien=schnittlinien
+                    slot_daten, ziel,
+                    schnittlinien=schnittlinien,
+                    beschriftung=beschriftung,
                 )
                 exportiert += 1
             except Exception:
@@ -689,13 +863,6 @@ class PhotowandApp(TkinterDnD.Tk if DND_VERFUEGBAR else tk.Tk):
             "Export abgeschlossen",
             f"{exportiert} Seite(n) exportiert nach:\n{ordner}",
         )
-
-    def _format_aendern(self, format_name: str) -> None:
-        """Wechselt das Papierformat und baut die Vorschau neu auf."""
-        self._layout.setze_format(format_name)
-        self._a4_preview.format_aktualisieren()
-        self._ausgewaehltes_foto = None
-        self._status_aktualisieren()
 
     def _zuruecksetzen(self) -> None:
         """Setzt alles zurueck."""
@@ -707,11 +874,25 @@ class PhotowandApp(TkinterDnD.Tk if DND_VERFUEGBAR else tk.Tk):
         self._aktuelle_seite = 0
         self._seiten_daten = [{}]
         self._projekt_pfad = None
-        self.title("Photowand v1.0.1 — Hexagonale Bildrahmen")
+
+        # Pointy-Top zuruecksetzen
+        if self._hex_geo.pointy_top:
+            self._hex_geo = HexagonGeometry(pointy_top=False)
+            self._layout = LayoutEngine(self._hex_geo)
+            self._renderer = A4Renderer(self._layout, self._hex_geo)
+            self._pointy_top_var.set(False)
+            self._a4_preview.hex_geo = self._hex_geo
+            self._a4_preview.layout = self._layout
+            self._a4_preview.format_aktualisieren()
+
+        # Format zuruecksetzen
+        self._format_aendern("A4")
+
+        self.title("Photowand v1.0.3 — Hexagonale Bildrahmen")
         self._seiten_navigation_aktualisieren()
         self._status_var.set("Bereit — Ordner mit Fotos laden um zu beginnen")
 
-    # --- Undo/Redo (Feature 8) ---
+    # --- Undo/Redo ---
 
     def _zustand_sichern(self) -> None:
         """Sichert den aktuellen Slot-Zustand fuer Undo."""
@@ -724,6 +905,8 @@ class PhotowandApp(TkinterDnD.Tk if DND_VERFUEGBAR else tk.Tk):
                     "zoom": data.zoom,
                     "offset_x": data.offset_x,
                     "offset_y": data.offset_y,
+                    "rotation": data.rotation,
+                    "beschriftung": data.beschriftung,
                 }
         self._undo_stack.append(zustand)
         # Maximal 30 Undo-Schritte
@@ -746,6 +929,8 @@ class PhotowandApp(TkinterDnD.Tk if DND_VERFUEGBAR else tk.Tk):
                     "zoom": data.zoom,
                     "offset_x": data.offset_x,
                     "offset_y": data.offset_y,
+                    "rotation": data.rotation,
+                    "beschriftung": data.beschriftung,
                 }
         self._redo_stack.append(aktuell)
 
@@ -769,6 +954,8 @@ class PhotowandApp(TkinterDnD.Tk if DND_VERFUEGBAR else tk.Tk):
                     "zoom": data.zoom,
                     "offset_x": data.offset_x,
                     "offset_y": data.offset_y,
+                    "rotation": data.rotation,
+                    "beschriftung": data.beschriftung,
                 }
         self._undo_stack.append(aktuell)
 
@@ -798,11 +985,13 @@ class PhotowandApp(TkinterDnD.Tk if DND_VERFUEGBAR else tk.Tk):
                 slot._slot_data.zoom = daten["zoom"]
                 slot._slot_data.offset_x = daten["offset_x"]
                 slot._slot_data.offset_y = daten["offset_y"]
+                slot._slot_data.rotation = daten.get("rotation", 0)
+                slot._slot_data.beschriftung = daten.get("beschriftung", "")
                 slot._vorschau_aktualisieren()
             except Exception:
                 pass
 
-    # --- Seiten-Navigation (Feature 7) ---
+    # --- Seiten-Navigation ---
 
     def _seite_sichern(self) -> None:
         """Sichert den aktuellen Seitenzustand."""
@@ -815,6 +1004,8 @@ class PhotowandApp(TkinterDnD.Tk if DND_VERFUEGBAR else tk.Tk):
                     "zoom": data.zoom,
                     "offset_x": data.offset_x,
                     "offset_y": data.offset_y,
+                    "rotation": data.rotation,
+                    "beschriftung": data.beschriftung,
                 }
         # Seitenliste erweitern falls noetig
         while len(self._seiten_daten) <= self._aktuelle_seite:
@@ -822,18 +1013,26 @@ class PhotowandApp(TkinterDnD.Tk if DND_VERFUEGBAR else tk.Tk):
         self._seiten_daten[self._aktuelle_seite] = zustand
 
     def _seite_laden(self, seiten_nr: int) -> None:
-        """Laedt eine bestimmte Seite."""
+        """Laedt eine bestimmte Seite (sichert vorher die aktuelle)."""
         if seiten_nr < 0 or seiten_nr >= len(self._seiten_daten):
             return
         self._seite_sichern()
         self._aktuelle_seite = seiten_nr
+        self._seite_laden_intern(seiten_nr)
+        self._seiten_navigation_aktualisieren()
+        self._status_aktualisieren()
 
+    def _seite_laden_intern(self, seiten_nr: int) -> None:
+        """Laedt eine Seite ohne vorher zu sichern (intern)."""
         # Alle Slots leeren
         for slot in self._a4_preview.alle_slots():
             slot.foto_entfernen()
 
+        # Beschriftungszustand uebernehmen
+        beschriftung_aktiv = self._beschriftung_var.get()
+
         # Gespeicherten Zustand wiederherstellen
-        zustand = self._seiten_daten[seiten_nr]
+        zustand = self._seiten_daten[seiten_nr] if seiten_nr < len(self._seiten_daten) else {}
         for slot_idx, daten in zustand.items():
             idx = int(slot_idx) if isinstance(slot_idx, str) else slot_idx
             if idx >= len(self._a4_preview.alle_slots()):
@@ -844,16 +1043,16 @@ class PhotowandApp(TkinterDnD.Tk if DND_VERFUEGBAR else tk.Tk):
             try:
                 foto = lade_bild(pfad)
                 slot = self._a4_preview.slot_abrufen(idx)
+                slot.beschriftung_sichtbar = beschriftung_aktiv
                 slot.foto_setzen(foto, pfad)
                 slot._slot_data.zoom = daten["zoom"]
                 slot._slot_data.offset_x = daten["offset_x"]
                 slot._slot_data.offset_y = daten["offset_y"]
+                slot._slot_data.rotation = daten.get("rotation", 0)
+                slot._slot_data.beschriftung = daten.get("beschriftung", "")
                 slot._vorschau_aktualisieren()
             except Exception:
                 pass
-
-        self._seiten_navigation_aktualisieren()
-        self._status_aktualisieren()
 
     def _seite_zurueck(self) -> None:
         """Geht zur vorherigen Seite."""
@@ -871,12 +1070,168 @@ class PhotowandApp(TkinterDnD.Tk if DND_VERFUEGBAR else tk.Tk):
         self._seiten_daten.append({})
         self._seite_laden(len(self._seiten_daten) - 1)
 
+    def _seite_loeschen(self) -> None:
+        """Loescht die aktuelle Seite nach Bestaetigung."""
+        if len(self._seiten_daten) <= 1:
+            messagebox.showinfo(
+                "Nicht möglich",
+                "Die letzte Seite kann nicht gelöscht werden.",
+            )
+            return
+
+        antwort = messagebox.askyesno(
+            "Seite löschen",
+            f"Seite {self._aktuelle_seite + 1} löschen?\n"
+            f"Alle Fotozuweisungen dieser Seite gehen verloren.",
+        )
+        if not antwort:
+            return
+
+        # Seite entfernen
+        self._seiten_daten.pop(self._aktuelle_seite)
+
+        # Zur vorherigen Seite wechseln (oder bleiben wenn erste)
+        if self._aktuelle_seite >= len(self._seiten_daten):
+            self._aktuelle_seite = len(self._seiten_daten) - 1
+
+        self._seite_laden_intern(self._aktuelle_seite)
+        self._seiten_navigation_aktualisieren()
+        self._status_aktualisieren()
+
     def _seiten_navigation_aktualisieren(self) -> None:
         """Aktualisiert die Seiten-Anzeige."""
         gesamt = len(self._seiten_daten)
         self._seiten_label_var.set(f"Seite {self._aktuelle_seite + 1}/{gesamt}")
 
     # --- Hilfsfunktionen ---
+
+    def _anleitung_anzeigen(self) -> None:
+        """Zeigt die Anleitung in einem scrollbaren Dialog."""
+        fenster = tk.Toplevel(self)
+        fenster.title("Photowand — Anleitung")
+        fenster.geometry("620x520")
+        fenster.resizable(True, True)
+        fenster.transient(self)
+        fenster.grab_set()
+
+        text = tk.Text(
+            fenster,
+            wrap="word",
+            font=("Segoe UI", 10),
+            bg="#2b2b2b",
+            fg="#e0e0e0",
+            padx=14,
+            pady=10,
+            borderwidth=0,
+            highlightthickness=0,
+        )
+        scrollbar = tk.Scrollbar(fenster, command=text.yview)
+        text.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+        text.pack(side="left", fill="both", expand=True)
+
+        # Tags fuer Formatierung
+        text.tag_configure("h1", font=("Segoe UI", 16, "bold"), spacing3=6)
+        text.tag_configure("h2", font=("Segoe UI", 12, "bold"), spacing1=12, spacing3=4)
+        text.tag_configure("bold", font=("Segoe UI", 10, "bold"))
+
+        anleitung = [
+            ("h1", "Photowand — Anleitung\n"),
+            ("", "Photowand erstellt Druckvorlagen fuer sechseckige "
+             "Bilderrahmen. Die Rahmen werden per 3D-Druck hergestellt "
+             "und zu einer Fotowand zusammengesteckt.\n\n"),
+            ("h2", "Fotos laden\n"),
+            ("", "Klicke auf \"Fotos laden\" in der Werkzeugleiste oder "
+             "waehle Datei > Fotos laden im Menue. Es oeffnet sich ein "
+             "Ordner-Dialog — alle Bilder im gewaehlten Ordner werden als "
+             "Thumbnails in der linken Seitenleiste angezeigt.\n"
+             "Alternativ: Ziehe Dateien oder Ordner per Drag & Drop direkt "
+             "ins Programmfenster.\n\n"),
+            ("h2", "Fotos zuweisen\n"),
+            ("", "1. Klicke auf ein Thumbnail in der Seitenleiste — freie "
+             "Hexagone werden markiert.\n"
+             "2. Klicke auf ein markiertes Hexagon, um das Foto zuzuweisen.\n"
+             "Oder nutze \"Auto-Fill\" um alle Fotos automatisch der Reihe "
+             "nach einzufuellen.\n\n"),
+            ("h2", "Foto anpassen\n"),
+            ("", "Mausrad: Zoom rein/raus im Hexagon.\n"
+             "Linke Maustaste ziehen: Bildausschnitt verschieben.\n"
+             "Rechtsklick auf ein belegtes Hexagon oeffnet ein Kontextmenue:\n"
+             "  - Foto entfernen\n"
+             "  - Foto ersetzen\n"
+             "  - Drehen (90 grad rechts / 180 grad / 90 grad links)\n"
+             "  - Zoom zuruecksetzen\n"
+             "  - Beschriftung bearbeiten\n"
+             "  - Tauschen mit einem anderen Slot\n\n"),
+            ("h2", "Drag & Drop zwischen Slots\n"),
+            ("", "Ziehe ein belegtes Hexagon mit der Maus auf ein anderes "
+             "Hexagon, um die Fotos zu tauschen. Der Ziel-Slot wird "
+             "hervorgehoben.\n\n"),
+            ("h2", "Seiten-Verwaltung\n"),
+            ("", "Unten rechts findest du die Seiten-Navigation:\n"
+             "  - \"+ Seite\" fuegt eine leere Seite hinzu.\n"
+             "  - \"- Seite\" loescht die aktuelle Seite.\n"
+             "  - Pfeile zum Blaettern zwischen den Seiten.\n"
+             "Auch ueber das Menue \"Seite\" erreichbar.\n\n"),
+            ("h2", "Ansicht-Optionen (Menue \"Ansicht\")\n"),
+            ("", "Schnittlinien: Zeigt gestrichelte Schnittlinien um die "
+             "Hexagone im Druckbild an.\n"
+             "Beschriftung: Zeigt Dateinamen unter den Hexagonen an (im "
+             "Druckbild und in der Vorschau).\n"
+             "Pointy-Top: Wechselt die Hexagon-Orientierung (Ecken oben "
+             "statt flache Seite oben).\n"
+             "Papierformat: Wechselt zwischen A5, A4, A3, A2, A1 und A0.\n\n"),
+            ("h2", "Vorschau\n"),
+            ("", "Klicke auf \"Vorschau\" um das finale Druckbild in einem "
+             "separaten Fenster anzuzeigen. In der Vorschau kannst du mit "
+             "Pfeiltasten zwischen den Seiten blaettern.\n\n"),
+            ("h2", "Exportieren & Drucken\n"),
+            ("", "\"Export (PNG)\": Speichert die aktuelle Seite als "
+             "hochaufloesende PNG-Datei (300 DPI).\n"
+             "\"Alle export.\": Exportiert alle Seiten als separate "
+             "PNG-Dateien in einen Ordner.\n"
+             "\"Drucken\": Oeffnet den Windows-Druckdialog mit der "
+             "aktuellen Seite.\n\n"),
+            ("h2", "Projekt speichern & laden\n"),
+            ("", "Speichere dein Projekt als .photowand Datei, um es "
+             "spaeter weiterzubearbeiten. Alle Foto-Zuweisungen, Zoom-"
+             "Einstellungen, Rotationen und Beschriftungen werden "
+             "gesichert.\n\n"),
+            ("h2", "Rueckgaengig / Wiederherstellen\n"),
+            ("", "Strg+Z: Letzten Schritt rueckgaengig machen.\n"
+             "Strg+Y: Rueckgaengig gemachten Schritt wiederherstellen.\n"
+             "Bis zu 30 Undo-Schritte werden gespeichert.\n\n"),
+            ("h2", "Tastenkuerzel\n"),
+            ("", "Strg+S: Projekt speichern\n"
+             "Strg+O: Projekt oeffnen\n"
+             "Strg+Z: Rueckgaengig\n"
+             "Strg+Y: Wiederherstellen\n"),
+        ]
+
+        for tag, zeile in anleitung:
+            if tag:
+                text.insert("end", zeile, tag)
+            else:
+                text.insert("end", zeile)
+
+        text.configure(state="disabled")
+
+    def _ueber_anzeigen(self) -> None:
+        """Zeigt den Ueber-Dialog."""
+        messagebox.showinfo(
+            "Über Photowand",
+            "Photowand v1.0.3\n"
+            "Hexagonale Bildrahmen — Druckvorlagen-Generator\n\n"
+            "Erstellt Druckvorlagen fuer sechseckige Bilderrahmen,\n"
+            "die per 3D-Druck hergestellt und zu einer Fotowand\n"
+            "zusammengesteckt werden.\n\n"
+            "Hexagon-Masse (innere Oeffnung):\n"
+            "  Umkreisradius: 50.9 mm\n"
+            "  Flat-to-Flat: 88.2 mm\n"
+            "  Ecke-zu-Ecke: 101.8 mm\n\n"
+            "Python · CustomTkinter · Pillow\n"
+            "© 2025-2026",
+        )
 
     def _beenden(self) -> None:
         """Beendet die Anwendung sauber."""
