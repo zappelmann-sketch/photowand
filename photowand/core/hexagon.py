@@ -12,7 +12,7 @@ class HexagonGeometry:
     Vertices bei 0, 60, 120, 180, 240, 300 Grad.
     """
 
-    circumradius_mm: float = 49.9  # Mittelpunkt bis Ecke (aus STL-Analyse)
+    circumradius_mm: float = 50.9  # Mittelpunkt bis Ecke (innere Rahmenoeffnung, aus STL-Analyse)
 
     @property
     def apothem_mm(self) -> float:

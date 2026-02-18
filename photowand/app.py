@@ -35,7 +35,7 @@ class PhotowandApp(TkinterDnD.Tk if DND_VERFUEGBAR else tk.Tk):
     def __init__(self):
         super().__init__()
 
-        self.title("Photowand — Hexagonale Bildrahmen")
+        self.title("Photowand v1.0.1 — Hexagonale Bildrahmen")
         self.geometry("1100x800")
         self.minsize(900, 650)
         self.configure(bg="#2b2b2b")
@@ -707,7 +707,7 @@ class PhotowandApp(TkinterDnD.Tk if DND_VERFUEGBAR else tk.Tk):
         self._aktuelle_seite = 0
         self._seiten_daten = [{}]
         self._projekt_pfad = None
-        self.title("Photowand — Hexagonale Bildrahmen")
+        self.title("Photowand v1.0.1 — Hexagonale Bildrahmen")
         self._seiten_navigation_aktualisieren()
         self._status_var.set("Bereit — Ordner mit Fotos laden um zu beginnen")
 

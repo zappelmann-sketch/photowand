@@ -17,10 +17,10 @@ Photowand ist auf den mitgelieferten **Hex Picture Frame** (`Hex_Picture_Frame.s
 | Eigenschaft | Wert |
 |---|---|
 | Orientierung | Flat-Top (flache Seiten oben/unten) |
-| Umkreisradius | ~50 mm (Mitte → Ecke) |
-| Apothem | ~43,2 mm (Mitte → Seitenmitte) |
-| Flat-to-Flat | ~86,4 mm |
-| Ecke-zu-Ecke | ~100 mm |
+| Umkreisradius | ~50,9 mm (Mitte → Ecke) |
+| Apothem | ~44,1 mm (Mitte → Seitenmitte) |
+| Flat-to-Flat | ~88,2 mm |
+| Ecke-zu-Ecke | ~101,8 mm |
 
 ### 3D-Modell
 
@@ -85,7 +85,14 @@ Klicke auf **+ Seite** in der Statusleiste für eine neue Seite. Mit **◀ ▶**
 - **Export (PNG)** → 300-DPI-PNG speichern
 - **Drucken** → Öffnet den Windows-Druckdialog
 
-### 7. Projekt speichern
+> **Wichtig beim Drucken:** Im Windows-Druckdialog muss die Checkbox **„Bild an Rahmen anpassen"** aktiviert bleiben (ist standardmäßig gesetzt). Nur so werden die Hexagone in der korrekten Größe gedruckt und passen exakt in die 3D-gedruckten Rahmen.
+
+![Windows-Druckdialog — „Bild an Rahmen anpassen" muss aktiviert sein](pictures/druck.PNG)
+
+### 7. Fotos in den Rahmen einsetzen
+Die ausgeschnittenen Fotos werden mit **doppelseitigen Foto-Klebepads** in die hexagonalen Rahmen eingesetzt. So lassen sich die Bilder sauber und rückstandsfrei befestigen.
+
+### 8. Projekt speichern
 - **Speichern** (Ctrl+S) → `.photowand`-Projektdatei erstellen
 - **Öffnen** (Ctrl+O) → Gespeichertes Projekt wiederherstellen
 
@@ -193,10 +200,10 @@ Photowand is tailored to the included **Hex Picture Frame** (`Hex_Picture_Frame.
 | Property | Value |
 |---|---|
 | Orientation | Flat-top (flat edges top/bottom) |
-| Circumradius | ~50 mm (center → corner) |
-| Apothem | ~43.2 mm (center → edge midpoint) |
-| Flat-to-flat | ~86.4 mm |
-| Corner-to-corner | ~100 mm |
+| Circumradius | ~50.9 mm (center → corner) |
+| Apothem | ~44.1 mm (center → edge midpoint) |
+| Flat-to-flat | ~88.2 mm |
+| Corner-to-corner | ~101.8 mm |
 
 ### 3D Model
 
@@ -261,7 +268,14 @@ Click **+ Seite** (+ Page) in the status bar to add a new page. Use **◀ ▶** 
 - **Export (PNG)** → Save as 300 DPI PNG
 - **Drucken** (Print) → Opens the Windows print dialog
 
-### 7. Save Your Project
+> **Important when printing:** In the Windows print dialog, the checkbox **"Fit picture to frame"** must remain checked (it is enabled by default). This ensures the hexagons are printed at the correct size and fit precisely into the 3D-printed frames.
+
+![Windows Print Dialog — "Fit picture to frame" must be checked](pictures/druck.PNG)
+
+### 7. Insert Photos into the Frame
+Attach the cut-out photos to the hexagonal frames using **double-sided photo adhesive pads**. This provides a clean, residue-free way to mount the pictures.
+
+### 8. Save Your Project
 - **Speichern** / Save (Ctrl+S) → Create a `.photowand` project file
 - **Öffnen** / Open (Ctrl+O) → Restore a saved project
 
